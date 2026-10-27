@@ -101,6 +101,28 @@ astar:
   # 0 DIAG; 1 MANHATTAN; 2 EUCLIDEAN
   heu_type: 2
   debug_visualization_en: false
+  # ---- Perception-aware edge cost (plane normals from LIO) ----------------
+  # Edge cost = step * (1 + weight * cell_cost). cell_cost is 0 where the pose
+  # Fisher information from the visible planes has log det >= logdet_ref, and
+  # grows to cost_max where few or only parallel planes are visible. Planes
+  # must be in the same world frame as the odometry fed to rog_map.
+  perception:
+    enable: false
+    plane_topic: "/plane_normals"
+    weight: 2.0
+    update_rate: 2.0            # Hz, cost grid rebuild
+    grid_resolution: 0.5        # m
+    half_extent: [10.0, 10.0, 2.0]   # m around the drone; >= planning_horizon + margin
+    range: [0.1, 10.0]          # m, Mid-360
+    elevation_deg: [-27.0, 32.0] # level world frame; Mid-360 (-7..52) pitched 20 deg down
+    max_planes: 200
+    sigma_r: 0.02               # m
+    sigma_theta_deg: 0.15
+    eps_reg: 1.0e-6
+    logdet_ref: 70.0            # tune from visualization/perception_logdet (normal flight ~75-85)
+    logdet_scale: 10.0
+    cost_max: 3.0
+    default_cost: 0.0           # outside the grid / before the first scan
 
 
 rog_map:

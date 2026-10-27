@@ -44,6 +44,9 @@ namespace path_search {
         bool debug_visualization_en;
         bool allow_diag{false};
         int heu_type{0};
+        // Perception-aware edge cost: step * (1 + perception_weight * cell_cost).
+        bool perception_en{false};
+        double perception_weight{2.0};
 
         PathSearchConfig() {};
 
@@ -55,6 +58,8 @@ namespace path_search {
             loader.LoadParam(name_space + "/debug_visualization_en", debug_visualization_en, false);
             loader.LoadParam(name_space + "/heu_type", heu_type, 0);
             loader.LoadParam(name_space + "/visual_process", visual_process, false);
+            loader.LoadParam(name_space + "/perception/enable", perception_en, false);
+            loader.LoadParam(name_space + "/perception/weight", perception_weight, 2.0);
             map_voxel_num = Vec3i(vox_[0], vox_[1], vox_[2]);
             map_size_i = map_voxel_num / 2;
             map_voxel_num = map_size_i * 2 + Vec3i::Constant(1);

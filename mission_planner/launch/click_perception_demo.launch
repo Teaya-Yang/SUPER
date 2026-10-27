@@ -1,0 +1,30 @@
+<launch>
+    <!-- Click demo with the perception-aware A* cost.
+         The fake_plane_normals node stands in for FAST_LIO's /plane_normals using the
+         simulator's global map. Put a featureless_box over one side of your route to
+         see the frontend path move to the other side. -->
+
+    <!-- xmin ymin zmin xmax ymax zmax. Use a box that covers the whole sensor range on one side,
+         e.g. "[-30, -5, 0, -0.5, 25, 4]" (left of a route along +y); a small box barely changes
+         log det because the cells inside still see planes outside it. -->
+    <arg name="featureless_box" default="[]"/>
+    <arg name="max_planes" default="300"/>
+    <arg name="config" default="click_perception_ros1.yaml"/>
+
+    <node pkg="perfect_drone_sim" type="perfect_drone" name="perfect_drone" output="log">
+        <param name="config_name" value="click.yaml" type="string"/>
+    </node>
+
+    <node pkg="super_planner" type="fake_plane_normals.py" name="fake_plane_normals" output="screen">
+        <rosparam param="featureless_box" subst_value="true">$(arg featureless_box)</rosparam>
+        <param name="max_planes" value="$(arg max_planes)"/>
+        <param name="frame_id" value="world"/>
+    </node>
+
+    <node pkg="super_planner" name="fsm_node" type="fsm_node" output="screen">
+        <param name="config_name" value="$(arg config)" type="string"/>
+    </node>
+
+    <node pkg="rviz" type="rviz" name="top_down" args="-d $(find perfect_drone_sim)/rviz/perception_top_down.rviz" output="log"/>
+    <node pkg="rviz" type="rviz" name="fpv" args="-d $(find perfect_drone_sim)/rviz/fpv.rviz" output="log"/>
+</launch>

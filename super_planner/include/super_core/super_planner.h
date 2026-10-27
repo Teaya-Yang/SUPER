@@ -62,6 +62,7 @@ namespace super_planner {
         rog_map::ROGMapROS::Ptr map_ptr_;
         CorridorGenerator::Ptr cg_ptr_;
         path_search::Astar::Ptr astar_ptr_;
+        path_search::PerceptionCostMap::Ptr pc_map_;   // null unless astar/perception/enable
         ros_interface::RosInterface::Ptr ros_ptr_;
         Vec3f shifted_sfc_start_pt_;
 
@@ -117,6 +118,12 @@ namespace super_planner {
 
         bool goalValid() const {
             return gi_.goal_valid;
+        }
+
+        // Perception-aware A* cost map (null when disabled). The ROS layer feeds it
+        // plane normals and triggers its updates.
+        path_search::PerceptionCostMap::Ptr getPerceptionCostMap() const {
+            return pc_map_;
         }
 
         typedef std::shared_ptr<SuperPlanner> Ptr;

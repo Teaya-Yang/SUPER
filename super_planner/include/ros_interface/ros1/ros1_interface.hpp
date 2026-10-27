@@ -57,6 +57,8 @@ namespace ros_interface {
             /*=============================FOR A* debug ========================================*/
             ciri_mkr_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("visualization/ciri_debug_mkr", 100);
             ciri_pc_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("visualization/ciri_debug_pc", 100);
+            perception_cost_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("visualization/perception_cost", 1);
+            perception_logdet_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("visualization/perception_logdet", 1);
             /*=============================FOR replan log ========================================*/
             replan_log_pc_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("visualization/replan_log_pc", 100);
             replan_log_mkr_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("visualization/replan_log_mkr", 100);
@@ -415,6 +417,47 @@ namespace ros_interface {
             ciri_mkr_pub_.publish(mkr_arr);
         }
 
+        void vizPerceptionCostGrid(const vec_Vec3f &centres,
+                                   const std::vector<double> &cost,
+                                   const std::vector<double> &logdet) override {
+            if (!visualization_en_) {
+                return;
+            }
+            const bool want_cost = perception_cost_pub_.getNumSubscribers() > 0;
+            const bool want_logdet = perception_logdet_pub_.getNumSubscribers() > 0;
+            if (!want_cost && !want_logdet) {
+                return;
+            }
+            pcl::PointCloud<pcl::PointXYZI> cost_pc, logdet_pc;
+            for (size_t i = 0; i < centres.size(); ++i) {
+                pcl::PointXYZI pt;
+                pt.x = centres[i].x();
+                pt.y = centres[i].y();
+                pt.z = centres[i].z();
+                if (want_cost && i < cost.size()) {
+                    pt.intensity = cost[i];
+                    cost_pc.push_back(pt);
+                }
+                if (want_logdet && i < logdet.size()) {
+                    pt.intensity = logdet[i];
+                    logdet_pc.push_back(pt);
+                }
+            }
+            sensor_msgs::PointCloud2 msg;
+            if (want_cost) {
+                pcl::toROSMsg(cost_pc, msg);
+                msg.header.frame_id = DEFAULT_FRAME_ID;
+                msg.header.stamp = ros::Time::now();
+                perception_cost_pub_.publish(msg);
+            }
+            if (want_logdet) {
+                pcl::toROSMsg(logdet_pc, msg);
+                msg.header.frame_id = DEFAULT_FRAME_ID;
+                msg.header.stamp = ros::Time::now();
+                perception_logdet_pub_.publish(msg);
+            }
+        }
+
         void vizCiriPointCloud(const vec_Vec3f & points) override {
             if (!visualization_en_) {
                 return;
@@ -441,6 +484,8 @@ namespace ros_interface {
         ros::Publisher replan_log_mkr_pub_, replan_log_pc_pub_;
 
         ros::Publisher ciri_mkr_pub_, ciri_pc_pub_;
+
+        ros::Publisher perception_cost_pub_, perception_logdet_pub_;
 
 
     };

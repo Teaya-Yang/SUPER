@@ -35,6 +35,7 @@
 #include "nav_msgs/Odometry.h"
 #include "quadrotor_msgs/PositionCommand.h"
 #include "quadrotor_msgs/PolynomialTrajectory.h"
+#include "visualization_msgs/Marker.h"
 
 
 namespace fsm {
@@ -43,6 +44,9 @@ namespace fsm {
         ros::Subscriber goal_sub_;
         ros::Publisher cmd_pub, mpc_cmd_pub_, path_pub_;
         ros::Timer execution_timer_, replan_timer_, cmd_timer_;
+        // Perception-aware A* cost: plane normals in, cost grid rebuilt on a timer.
+        ros::Subscriber plane_sub_;
+        ros::Timer perception_timer_;
         quadrotor_msgs::PositionCommand pid_cmd_;
         rog_map::ROGMapROS::Ptr map_ptr_;
         quadrotor_msgs::PositionCommand latest_cmd;
@@ -302,6 +306,15 @@ namespace fsm {
                                                 this); // 10Hz
             }
 
+            if (auto pc_map = planner_ptr_->getPerceptionCostMap()) {
+                const auto &pp = pc_map->params();
+                plane_sub_ = nh_.subscribe(pp.plane_topic, 1, &FsmRos1::planeNormalsCallback, this);
+                perception_timer_ = nh_.createTimer(ros::Duration(1.0 / std::max(0.1, pp.update_rate)),
+                                                    &FsmRos1::perceptionTimerCallback, this);
+                cout << YELLOW << " -- [Fsm] Perception-aware A* cost: subscribing " << pp.plane_topic
+                     << ", grid update " << pp.update_rate << " Hz." << RESET << endl;
+            }
+
             write_time_.open(DEBUG_FILE_DIR("time_consuming.csv"), std::ios::out | std::ios::trunc);
             log_module_time.resize(9);
             for (int i = 0; i < 9; i++) {
@@ -349,6 +362,92 @@ namespace fsm {
 
         void replanTimerCallback(const ros::TimerEvent &event) {
             callReplanOnce();
+        }
+
+        // FAST_LIO publishes /plane_normals as a LINE_LIST marker: one segment per plane,
+        // p_start = point on the plane, p_end = p_start + 0.3 * normal, in its world frame.
+        // Same decoding as hiperlab's LidarVehicleStateMachine::CallbackPlaneNormals.
+        void planeNormalsCallback(const visualization_msgs::MarkerConstPtr &msg) {
+            auto pc_map = planner_ptr_->getPerceptionCostMap();
+            if (!pc_map) {
+                return;
+            }
+            if (msg->action == visualization_msgs::Marker::DELETE ||
+                msg->type != visualization_msgs::Marker::LINE_LIST ||
+                msg->points.size() < 2 || msg->points.size() % 2 != 0) {
+                return;
+            }
+            vec_Vec3f pts, nrm;
+            pts.reserve(msg->points.size() / 2);
+            nrm.reserve(msg->points.size() / 2);
+            for (size_t i = 0; i + 1 < msg->points.size(); i += 2) {
+                const auto &a = msg->points[i];
+                const auto &b = msg->points[i + 1];
+                const Vec3f p(a.x, a.y, a.z);
+                const Vec3f delta(b.x - a.x, b.y - a.y, b.z - a.z);
+                const double len = delta.norm();
+                if (len < 1e-12) {
+                    continue;
+                }
+                pts.push_back(p);
+                nrm.push_back(delta / len);
+            }
+            pc_map->setPlanes(pts, nrm);
+        }
+
+        void perceptionTimerCallback(const ros::TimerEvent &event) {
+            auto pc_map = planner_ptr_->getPerceptionCostMap();
+            if (!pc_map) {
+                return;
+            }
+            rog_map::RobotState rs;
+            planner_ptr_->getRobotState(rs);
+            if (!rs.rcv) {
+                return;
+            }
+            if (!pc_map->update(rs.p)) {
+                return;   // no planes yet, or a build is still running
+            }
+            auto g = pc_map->snapshot();
+            if (!g) {
+                return;
+            }
+
+            // Visualize one horizontal layer at the robot's height; a full 3D block
+            // would hide everything else in RViz.
+            int k = static_cast<int>(std::floor((rs.p.z() - g->origin.z()) / g->res));
+            k = std::max(0, std::min(g->dims.z() - 1, k));
+            vec_Vec3f centres;
+            std::vector<double> cost, logdet;
+            const int n_layer = g->dims.x() * g->dims.y();
+            centres.reserve(n_layer);
+            cost.reserve(n_layer);
+            logdet.reserve(n_layer);
+            int n_pen = 0;
+            double logdet_min = 1e9, logdet_max = -1e9;
+            for (int i = 0; i < g->dims.x(); ++i) {
+                for (int j = 0; j < g->dims.y(); ++j) {
+                    const int idx = (i * g->dims.y() + j) * g->dims.z() + k;
+                    centres.push_back(g->centre(i, j, k));
+                    cost.push_back(g->cost[idx]);
+                    logdet.push_back(g->logdet[idx]);
+                    if (g->cost[idx] > 0.f) n_pen++;
+                    logdet_min = std::min(logdet_min, static_cast<double>(g->logdet[idx]));
+                    logdet_max = std::max(logdet_max, static_cast<double>(g->logdet[idx]));
+                }
+            }
+            ros_ptr_->vizPerceptionCostGrid(centres, cost, logdet);
+
+            static double last_print_t = -1e9;
+            const double now = ros_ptr_->getSimTime();
+            if (now - last_print_t > 5.0) {
+                last_print_t = now;
+                ros_ptr_->info(" -- [Perception] grid {}x{}x{} from {} planes in {:.1f} ms; layer z={:.1f}: "
+                               "{}/{} cells penalized, logdet {:.1f}..{:.1f} (ref {:.1f})",
+                               g->dims.x(), g->dims.y(), g->dims.z(), g->n_planes, g->build_time_ms,
+                               g->centre(0, 0, k).z(), n_pen, n_layer, logdet_min, logdet_max,
+                               pc_map->params().logdet_ref);
+            }
         }
 
         void mainFsmTimerCallback(const ros::TimerEvent &event) {

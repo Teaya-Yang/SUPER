@@ -30,6 +30,7 @@
 #include "rog_map_ros/rog_map_ros2.hpp"
 #include "queue"
 #include "path_search/config.hpp"
+#include "path_search/perception_cost_map.h"
 #include "utils/header/type_utils.hpp"
 #include <ros_interface/ros_interface.hpp>
 
@@ -37,7 +38,7 @@
 namespace path_search {
     using namespace super_utils;
 
-    constexpr double inf = 1 >> 20;
+    constexpr double inf = 1 << 20;   // was `1 >> 20`, which is 0
     struct GridNode;
     typedef GridNode *GridNodePtr;
 
@@ -50,7 +51,11 @@ namespace path_search {
 
         int rounds{0};
         rog_map::Vec3i id_g;
+        // distance_score is the A* g value. With the perception cost enabled it is
+        // weighted path cost (voxels * (1 + w*c)); path_len stays pure length in voxels
+        // and is what the planning-horizon check uses.
         double total_score{inf}, distance_score{inf};
+        double path_len{0.0};
         double distance_to_goal{inf};
         GridNodePtr father_ptr{nullptr};
     };
@@ -89,6 +94,16 @@ namespace path_search {
         vector<GridNodePtr> grid_node_buffer_;
 
         int rounds_{0};
+
+        // Perception-aware cost (optional). pc_grid_ is a snapshot taken at the start
+        // of each search so the loop never locks.
+        PerceptionCostMap::Ptr pc_map_;
+        std::shared_ptr<const PerceptionCostMap::Grid> pc_grid_;
+        double pc_weight_{0.0}, pc_default_cost_{0.0};
+
+        // Diagnostics of the last point-to-point search.
+        double last_search_time_ms_{0.0};
+        int last_iter_num_{0};
 
         static constexpr int DIAG = 0;
         static constexpr int MANH = 1;
@@ -147,6 +162,14 @@ namespace path_search {
         void setVisualProcessEn(const bool &en);
 
         void setFineInfNeighbors(const int & neighbor_step);
+
+        void setPerceptionCostMap(const PerceptionCostMap::Ptr &pc_map);
+
+        double getLastSearchTimeMs() const { return last_search_time_ms_; }
+
+        int getLastIterNum() const { return last_iter_num_; }
+
+        bool perceptionCostActive() const { return pc_grid_ != nullptr; }
 
         RET_CODE pointToPointPathSearch(const rog_map::Vec3f &start_pt, const rog_map::Vec3f &end_pt,
                                         const int &flag,

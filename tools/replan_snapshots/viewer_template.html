@@ -1,0 +1,614 @@
+<title>SUPER Replan Snapshots</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/math/ConvexHull.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/geometries/ConvexGeometry.js"></script>
+<style>
+/* Layout: instrument panel. Run summary strip, then a large top-down plan view with a cycle readout beside it, then the snapshot strip and the deviation trace. */
+:root {
+  --bg: #eef1f3;
+  --panel: #f9fafb;
+  --ink: #161b20;
+  --muted: #5b6670;
+  --rule: #d3d9de;
+  --grid: #e1e6ea;
+  --obstacle: #39424b;
+  --corridor: #3d7fb8;
+  --reused: #c78512;
+  --astar: #c2348a;
+  --exp: #1b8f5a;
+  --backup: #6d5bd0;
+  --flown: #8c98a3;
+  --bound: #b5462f;
+  --focus: #1f6fb2;
+  --font-display: "Archivo", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11161a; --panel: #182025; --ink: #e4e9ed; --muted: #94a1ab; --rule: #2b353d; --grid: #1f282e;
+    --obstacle: #9aa7b1; --corridor: #5b9fd8; --reused: #e3a63a; --astar: #e65fad; --exp: #3cc184;
+    --backup: #9a8cf0; --flown: #61707b; --bound: #e2714f; --focus: #6fb0ea; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11161a; --panel: #182025; --ink: #e4e9ed; --muted: #94a1ab; --rule: #2b353d; --grid: #1f282e;
+  --obstacle: #9aa7b1; --corridor: #5b9fd8; --reused: #e3a63a; --astar: #e65fad; --exp: #3cc184;
+  --backup: #9a8cf0; --flown: #61707b; --bound: #e2714f; --focus: #6fb0ea; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 14px; line-height: 1.45; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-inline: 20px; padding-block: 22px 40px; display: grid; gap: 22px; }
+header { display: grid; gap: 6px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+h1 { font-family: var(--font-display); font-stretch: 82%; font-weight: 750; font-size: clamp(26px, 4vw, 38px); line-height: 1.05; margin: 0; text-wrap: balance; letter-spacing: -.01em; }
+.lede { margin: 0; max-width: 68ch; color: var(--muted); }
+.stats { display: flex; flex-wrap: wrap; gap: 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.stat { flex: 1 1 140px; padding: 10px 14px; border-right: 1px solid var(--rule); display: grid; gap: 2px; min-width: 0; }
+.stat:last-child { border-right: 0; }
+.stat .k { font-size: 12px; color: var(--muted); }
+.stat .v { font-family: var(--font-mono); font-size: 18px; font-variant-numeric: tabular-nums; }
+.stat .v small { font-size: 12px; color: var(--muted); }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 18px; align-items: start; }
+@media (max-width: 860px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.plan { background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; display: grid; min-width: 0; }
+.plan canvas, .view3d { width: 100%; height: min(68vh, 640px); min-height: 340px; display: block; }
+.view3d { position: relative; }
+.view3d canvas { width: 100% !important; height: 100% !important; display: block; touch-action: none; }
+.view3d .hint { position: absolute; left: 12px; bottom: 10px; font: 12px var(--font-mono); color: var(--muted); pointer-events: none; }
+.view3d .err { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); padding: 20px; text-align: center; }
+.tabs { display: flex; gap: 0; border-bottom: 1px solid var(--rule); }
+.tab { border: 0; border-right: 1px solid var(--rule); border-radius: 0; background: transparent; padding: 8px 14px; font: 600 13px var(--font-body); color: var(--muted); }
+.tab[aria-selected="true"] { color: var(--ink); background: var(--bg); box-shadow: inset 0 -2px 0 var(--focus); }
+.viewnote { padding: 6px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--rule); }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--rule); }
+.controls input[type=range] { flex: 1 1 220px; accent-color: var(--focus); min-width: 0; }
+button { font: 500 13px var(--font-body); color: var(--ink); background: var(--bg); border: 1px solid var(--rule); border-radius: 3px; padding: 5px 10px; cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button:focus-visible, input:focus-visible, .thumb:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.cyc { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 13px; color: var(--muted); }
+aside { display: grid; gap: 16px; min-width: 0; }
+.readout { display: grid; gap: 0; border-top: 2px solid var(--ink); }
+.row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--rule); }
+.row .k { color: var(--muted); }
+.row .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+.status { display: inline-block; font: 500 12px var(--font-mono); padding: 2px 7px; border-radius: 99px; border: 1px solid currentColor; }
+.status.ok { color: var(--exp); }
+.status.fail { color: var(--bound); }
+.legend { display: grid; gap: 6px; }
+.legend label { display: flex; align-items: center; gap: 9px; cursor: pointer; }
+.sw { width: 22px; height: 10px; flex: none; border-radius: 2px; }
+.sw.line { height: 3px; }
+.sw.dash { height: 0; border-top: 3px dashed var(--backup); background: none; }
+h2 { font-family: var(--font-display); font-stretch: 82%; font-weight: 700; font-size: 20px; margin: 0; }
+.section { display: grid; gap: 10px; }
+.section p { margin: 0; color: var(--muted); max-width: 72ch; }
+.strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.thumb { background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; padding: 0; cursor: pointer; display: grid; text-align: left; color: var(--ink); }
+.thumb[aria-pressed="true"] { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+.thumb canvas { width: 100%; aspect-ratio: 1 / 1; display: block; max-width: 100%; }
+.thumb span { font: 12px var(--font-mono); color: var(--muted); padding: 5px 8px; border-top: 1px solid var(--rule); font-variant-numeric: tabular-nums; }
+.chart { background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; }
+.chart canvas { width: 100%; height: 220px; display: block; cursor: crosshair; }
+.foot { font-size: 12px; color: var(--muted); max-width: 90ch; }
+.foot code { font-family: var(--font-mono); }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow" id="runLabel">run</div>
+    <h1>A* path vs. optimized trajectory, one replan at a time</h1>
+    <p class="lede">Each replan, SUPER keeps the start of the old trajectory, extends it with A*, builds a corridor around that guide path, then optimizes inside the corridor. Step through the cycles to see how far the optimizer moves away from the A* shape.</p>
+  </header>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="main">
+    <div class="plan">
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" id="tab2d" aria-selected="true">Top-down</button>
+        <button class="tab" role="tab" id="tab3d" aria-selected="false">3D</button>
+      </div>
+      <div class="viewnote" id="viewnote"></div>
+      <canvas id="plan" aria-label="Top-down view of the selected replan cycle"></canvas>
+      <div class="view3d" id="view3d" hidden><span class="hint">Drag to orbit · right-drag to pan · scroll to zoom</span></div>
+      <div class="controls">
+        <button id="prev" title="Previous cycle (left arrow)">Prev</button>
+        <button id="play" title="Play or pause (space)">Play</button>
+        <button id="next" title="Next cycle (right arrow)">Next</button>
+        <input id="slider" type="range" min="0" max="0" value="0" aria-label="Replan cycle">
+        <span class="cyc" id="cycLabel"></span>
+      </div>
+    </div>
+    <aside>
+      <div class="readout" id="readout"></div>
+      <div class="legend" id="legend"></div>
+    </aside>
+  </div>
+
+  <section class="section">
+    <h2>Snapshots across the flight</h2>
+    <p>Evenly spaced replans that produced a trajectory, top-down. Each is framed on its own guide path and shows only obstacles near its flight height. Select one to open it above.</p>
+    <div class="strip" id="strip"></div>
+  </section>
+
+  <section class="section">
+    <h2>Deviation per cycle</h2>
+    <p id="chartNote">Largest and mean distance from the optimized trajectory to the guide path. The dashed line is the corridor bound, the farthest a corridor reaches past its seed segment. Select a point to open that cycle.</p>
+    <div class="chart"><canvas id="chart" aria-label="Deviation of optimized trajectory from guide path over time"></canvas></div>
+  </section>
+
+  <p class="foot" id="foot"></p>
+</div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+(function () {
+  const D = JSON.parse(document.getElementById("data").textContent);
+  const META = D.meta || {};
+  const cycles = D.cycles;
+  const okIdx = cycles.map((c, i) => (c.exp && c.exp.length ? i : -1)).filter(i => i >= 0);
+  const cell = D.obstacle_cell || 0.2;
+  const V = D.voxels || [];
+  const nVox = V.length / 3;
+  const VX = new Float32Array(nVox), VY = new Float32Array(nVox), VZ = new Float32Array(nVox);
+  for (let i = 0; i < nVox; i++) { VX[i] = V[3 * i] * cell; VY[i] = V[3 * i + 1] * cell; VZ[i] = V[3 * i + 2] * cell; }
+  const SLICE = 0.3;  // m above and below the cycle's path heights, for the top-down view
+  const odom = D.odom;
+
+  // ---------- derived per-cycle numbers ----------
+  function len(pts, a, b) {
+    let L = 0;
+    for (let i = Math.max(a, 1); i < b; i++) {
+      const p = pts[i - 1], q = pts[i];
+      L += Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]);
+    }
+    return L;
+  }
+  function hull2(pts) {
+    const P = pts.map(p => [p[0], p[1]]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    if (P.length < 3) return P;
+    const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lo = [], up = [];
+    for (const p of P) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+    for (let i = P.length - 1; i >= 0; i--) { const p = P[i]; while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+    return lo.slice(0, -1).concat(up.slice(0, -1));
+  }
+  cycles.forEach(c => {
+    let z0 = Infinity, z1 = -Infinity;
+    c.guide.concat(c.exp).forEach(p => { z0 = Math.min(z0, p[2]); z1 = Math.max(z1, p[2]); });
+    c.zlo = z0 - SLICE; c.zhi = z1 + SLICE;
+    c.sfc2 = null;
+    const n = c.guide.length, r = Math.min(c.n_reused, n);
+    c.lenReused = len(c.guide, 1, r);
+    c.lenAstar = len(c.guide, Math.max(r, 1), n);
+  });
+  const median = a => { const s = a.slice().sort((x, y) => x - y); const m = s.length >> 1; return s.length ? (s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2) : NaN; };
+  const pct = (a, p) => { const s = a.slice().sort((x, y) => x - y); return s.length ? s[Math.min(s.length - 1, Math.floor(p * s.length))] : NaN; };
+  const f2 = v => (v == null || isNaN(v) ? "–" : v.toFixed(2));
+
+  // ---------- theme colors ----------
+  let C = {};
+  function readColors() {
+    const cs = getComputedStyle(document.documentElement);
+    ["bg", "panel", "ink", "muted", "rule", "grid", "obstacle", "corridor", "reused", "astar", "exp", "backup", "flown", "bound", "focus"]
+      .forEach(k => C[k] = cs.getPropertyValue("--" + k).trim());
+  }
+  function alpha(hex, a) {
+    const h = hex.replace("#", "");
+    const n = parseInt(h.length === 3 ? h.split("").map(x => x + x).join("") : h, 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  }
+
+  // ---------- header ----------
+  document.getElementById("runLabel").textContent = META.label || D.bag || "run";
+  const devMax = okIdx.map(i => cycles[i].dev_max), devMean = okIdx.map(i => cycles[i].dev_mean);
+  const stats = [
+    ["Replan cycles", `${cycles.length}`, `<small> ${okIdx.length} optimized</small>`],
+    ["Max deviation, median", f2(median(devMax)), "<small> m</small>"],
+    ["Max deviation, 90th pct", f2(pct(devMax, 0.9)), "<small> m</small>"],
+    ["Mean deviation, median", f2(median(devMean)), "<small> m</small>"],
+    ["Guide reused / A*, median", `${f2(median(cycles.map(c => c.lenReused)))} / ${f2(median(cycles.map(c => c.lenAstar)))}`, "<small> m</small>"],
+  ];
+  if (META.bound != null) stats.push(["Corridor bound", f2(META.bound), "<small> m</small>"]);
+  document.getElementById("stats").innerHTML = stats.map(([k, v, u]) =>
+    `<div class="stat"><span class="k">${k}</span><span class="v">${v}${u}</span></div>`).join("");
+  document.getElementById("foot").innerHTML =
+    `Source: <code>${D.bag}</code>. Guide points within ${D.reuse_tol} m of the previously committed trajectory count as reused; the rest come from A*. ` +
+    `Obstacles are map points between ${(D.obstacle_z || ["?", "?"]).join(" and ")} m high, as ${cell} m voxels. ` +
+    `The top-down view shows only voxels within ${SLICE} m of the heights the guide path and trajectory pass through in that cycle, and draws each 3D corridor polytope as its top-down outline.`;
+  if (META.bound == null) document.getElementById("chartNote").textContent =
+    "Largest and mean distance from the optimized trajectory to the guide path. Select a point to open that cycle.";
+
+  // ---------- layers ----------
+  const layers = [
+    ["obst", "Obstacles", "obstacle", "box", true],
+    ["corr", "Corridor polytopes", "corridor", "box", true],
+    ["reused", "Guide path, reused from old trajectory", "reused", "line", true],
+    ["astar", "Guide path, new A* segment", "astar", "line", true],
+    ["exp", "Optimized exploratory trajectory", "exp", "line", true],
+    ["backup", "Committed backup trajectory", "backup", "dash", true],
+    ["flown", "Flown path and drone position", "flown", "line", true],
+  ];
+  const on = {};
+  const legend = document.getElementById("legend");
+  legend.innerHTML = layers.map(([id, name, col, kind, def]) => {
+    on[id] = def;
+    const sw = kind === "dash" ? `<span class="sw dash"></span>` :
+      `<span class="sw ${kind === "line" ? "line" : ""}" style="background:var(--${col})${kind === "box" && id === "corr" ? ";opacity:.45" : ""}"></span>`;
+    return `<label><input type="checkbox" id="ly_${id}" ${def ? "checked" : ""}>${sw}<span>${name}</span></label>`;
+  }).join("");
+  layers.forEach(([id]) => document.getElementById("ly_" + id).addEventListener("change", e => { on[id] = e.target.checked; drawAll(); if (mode === "3d") build3d(); }));
+
+  // ---------- geometry helpers ----------
+  function cycleBox(c) {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    const add = p => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); };
+    c.guide.forEach(add); c.exp.forEach(add);
+    if (!isFinite(x0)) c.sfc.forEach(poly => poly.forEach(add));
+    return { x0, x1, y0, y1 };
+  }
+  function odomAt(t) {
+    let lo = 0, hi = odom.length - 1;
+    while (lo < hi) { const m = (lo + hi + 1) >> 1; if (odom[m][0] <= t) lo = m; else hi = m - 1; }
+    return lo;
+  }
+  function setupCanvas(cv) {
+    const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    const ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, W: r.width, H: r.height };
+  }
+
+  // ---------- plan view ----------
+  function drawCycle(cv, c, opts) {
+    const { ctx, W, H } = setupCanvas(cv);
+    ctx.fillStyle = C.panel; ctx.fillRect(0, 0, W, H);
+    const b = cycleBox(c), pad = opts.small ? 0.8 : 1.5;
+    const bx0 = b.x0 - pad, bx1 = b.x1 + pad, by0 = b.y0 - pad, by1 = b.y1 + pad;
+    const s = Math.min(W / (bx1 - bx0), H / (by1 - by0));
+    const cx = (bx0 + bx1) / 2, cy = (by0 + by1) / 2;
+    const X = x => W / 2 + (x - cx) * s, Y = y => H / 2 - (y - cy) * s;
+    const vx0 = cx - W / 2 / s, vx1 = cx + W / 2 / s, vy0 = cy - H / 2 / s, vy1 = cy + H / 2 / s;
+
+    if (!opts.small) {  // 1 m grid
+      ctx.strokeStyle = C.grid; ctx.lineWidth = 1; ctx.beginPath();
+      for (let x = Math.ceil(vx0); x <= vx1; x++) { ctx.moveTo(X(x), 0); ctx.lineTo(X(x), H); }
+      for (let y = Math.ceil(vy0); y <= vy1; y++) { ctx.moveTo(0, Y(y)); ctx.lineTo(W, Y(y)); }
+      ctx.stroke();
+    }
+    if (on.obst) {
+      ctx.fillStyle = C.obstacle; const w = cell * s;
+      for (let i = 0; i < nVox; i++) {
+        const x = VX[i], y = VY[i], z = VZ[i];
+        if (z < c.zlo || z > c.zhi || x < vx0 - cell || x > vx1 + cell || y < vy0 - cell || y > vy1 + cell) continue;
+        ctx.fillRect(X(x) - w / 2, Y(y) - w / 2, w, w);
+      }
+    }
+    if (on.corr) {
+      if (!c.sfc2) c.sfc2 = c.sfc.map(hull2);
+      c.sfc2.forEach(poly => {
+        if (poly.length < 3) return;
+        ctx.beginPath(); poly.forEach((p, i) => i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1]))); ctx.closePath();
+        ctx.fillStyle = alpha(C.corridor, 0.10); ctx.fill();
+        ctx.strokeStyle = alpha(C.corridor, 0.65); ctx.lineWidth = 1; ctx.stroke();
+      });
+    }
+    if (on.flown && odom.length) {
+      const k = odomAt(c.t);
+      ctx.strokeStyle = C.flown; ctx.lineWidth = 1.5; ctx.beginPath();
+      for (let i = 0; i <= k; i++) { const p = odom[i]; i ? ctx.lineTo(X(p[1]), Y(p[2])) : ctx.moveTo(X(p[1]), Y(p[2])); }
+      ctx.stroke();
+      const p = odom[k];
+      ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(X(p[1]), Y(p[2]), opts.small ? 3 : 5, 0, 7); ctx.fill();
+    }
+    function poly(pts, col, w, dash) {
+      if (pts.length < 2) return;
+      ctx.setLineDash(dash || []); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineJoin = "round"; ctx.lineCap = "round";
+      ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1]))); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    function dots(pts, col, r) { ctx.fillStyle = col; pts.forEach(p => { ctx.beginPath(); ctx.arc(X(p[0]), Y(p[1]), r, 0, 7); ctx.fill(); }); }
+    const r = Math.min(c.n_reused, c.guide.length);
+    const reused = c.guide.slice(0, r), astar = c.guide.slice(Math.max(r - 1, 0));
+    if (on.backup) poly(c.backup, C.backup, opts.small ? 1.5 : 2.5, [6, 5]);
+    if (on.reused) { poly(reused, C.reused, opts.small ? 1.5 : 2); if (!opts.small) dots(reused, C.reused, 2.2); }
+    if (on.astar) { poly(astar, C.astar, opts.small ? 1.5 : 2); if (!opts.small) dots(astar.slice(1), C.astar, 2.4); }
+    if (on.exp) poly(c.exp, C.exp, opts.small ? 2 : 3.5);
+
+    if (!opts.small) {  // scale bar
+      const meters = (W / s) > 12 ? 5 : (W / s) > 5 ? 2 : 1;
+      const x0 = 16, y0 = H - 18;
+      ctx.font = "12px " + getComputedStyle(document.body).getPropertyValue("--font-mono");
+      const label = (txt, x, y, col) => {
+        const w = ctx.measureText(txt).width;
+        ctx.fillStyle = alpha(C.panel, 0.88); ctx.fillRect(x - 5, y - 13, w + 10, 19);
+        ctx.fillStyle = col; ctx.fillText(txt, x, y);
+      };
+      ctx.fillStyle = alpha(C.panel, 0.88); ctx.fillRect(x0 - 6, y0 - 10, meters * s + 12, 20);
+      ctx.strokeStyle = C.ink; ctx.lineWidth = 2; ctx.beginPath();
+      ctx.moveTo(x0, y0); ctx.lineTo(x0 + meters * s, y0); ctx.moveTo(x0, y0 - 4); ctx.lineTo(x0, y0 + 4);
+      ctx.moveTo(x0 + meters * s, y0 - 4); ctx.lineTo(x0 + meters * s, y0 + 4); ctx.stroke();
+      label(`${meters} m`, x0 + meters * s + 10, y0 + 4, C.ink);
+      label(`t = ${c.t.toFixed(2)} s · grid 1 m · x right, y up · obstacles at z ${c.zlo.toFixed(1)} to ${c.zhi.toFixed(1)} m`, 16, 22, C.muted);
+      if (!c.exp.length) label("No optimized trajectory this cycle", 16, 44, C.bound);
+    }
+  }
+
+  // ---------- state ----------
+  const slider = document.getElementById("slider");
+  slider.max = String(cycles.length - 1);
+  let cur = okIdx.length ? okIdx[Math.floor(okIdx.length * 0.35)] : 0;
+  try { const h = location.hash.replace("#c", ""); if (/^\d+$/.test(h) && +h < cycles.length) cur = +h; } catch (e) {}
+
+  function readout() {
+    const c = cycles[cur];
+    const rows = [
+      ["Cycle", `${cur + 1} of ${cycles.length}`],
+      ["Time", `${c.t.toFixed(2)} s`],
+      ["Result", c.exp.length ? `<span class="status ok">optimized</span>` : `<span class="status fail">no trajectory</span>`],
+      ["Guide reused", `${c.lenReused.toFixed(2)} m`],
+      ["Guide from A*", `${c.lenAstar.toFixed(2)} m`],
+      ["Corridor polytopes", `${c.sfc.length}`],
+      ["Max deviation", c.dev_max == null ? "–" : `${c.dev_max.toFixed(2)} m`],
+      ["Mean deviation", c.dev_mean == null ? "–" : `${c.dev_mean.toFixed(2)} m`],
+    ];
+    document.getElementById("readout").innerHTML = rows.map(([k, v]) => `<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
+    document.getElementById("cycLabel").textContent = `cycle ${cur + 1} / ${cycles.length}`;
+    document.querySelectorAll(".thumb").forEach(el => el.setAttribute("aria-pressed", String(+el.dataset.i === cur)));
+  }
+
+  // ---------- snapshot strip ----------
+  const strip = document.getElementById("strip");
+  const N = Math.min(10, okIdx.length);
+  const picks = Array.from({ length: N }, (_, k) => okIdx[Math.round((k + 0.5) * okIdx.length / N - 0.5)]);
+  strip.innerHTML = picks.map(i => `<button class="thumb" data-i="${i}" aria-pressed="false"><canvas></canvas><span>t ${cycles[i].t.toFixed(1)} s · dev ${f2(cycles[i].dev_max)} m</span></button>`).join("");
+  strip.querySelectorAll(".thumb").forEach(el => el.addEventListener("click", () => select(+el.dataset.i, true)));
+
+  // ---------- deviation chart ----------
+  const chartCv = document.getElementById("chart");
+  let chartMap = null;
+  function drawChart() {
+    const { ctx, W, H } = setupCanvas(chartCv);
+    ctx.fillStyle = C.panel; ctx.fillRect(0, 0, W, H);
+    const m = { l: 46, r: 14, t: 14, b: 30 };
+    const tMax = cycles.length ? cycles[cycles.length - 1].t : 1;
+    const yMaxData = Math.max(0.1, ...devMax.filter(v => v != null), META.bound || 0);
+    const yStep = yMaxData > 2 ? 1 : yMaxData > 1 ? 0.5 : 0.25;
+    const yMax = Math.ceil(yMaxData / yStep) * yStep;
+    const X = t => m.l + (W - m.l - m.r) * t / tMax, Y = v => H - m.b - (H - m.t - m.b) * v / yMax;
+    const mono = getComputedStyle(document.body).getPropertyValue("--font-mono");
+    ctx.font = "11px " + mono; ctx.textBaseline = "middle";
+    ctx.strokeStyle = C.grid; ctx.lineWidth = 1; ctx.fillStyle = C.muted;
+    for (let v = 0; v <= yMax + 1e-9; v += yStep) {
+      ctx.beginPath(); ctx.moveTo(m.l, Y(v)); ctx.lineTo(W - m.r, Y(v)); ctx.stroke();
+      ctx.textAlign = "right"; ctx.fillText(v.toFixed(2), m.l - 6, Y(v));
+    }
+    const tStep = tMax > 60 ? 10 : 5;
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    for (let t = 0; t <= tMax; t += tStep) ctx.fillText(`${t} s`, X(t), H - m.b + 8);
+    ctx.save(); ctx.translate(12, (H - m.b + m.t) / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("m", 0, 0); ctx.restore();
+    if (META.bound != null) {
+      ctx.setLineDash([5, 4]); ctx.strokeStyle = C.bound; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(m.l, Y(META.bound)); ctx.lineTo(W - m.r, Y(META.bound)); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = C.bound; ctx.textAlign = "right"; ctx.textBaseline = "bottom"; ctx.fillText("corridor bound", W - m.r - 4, Y(META.bound) - 3);
+    }
+    const series = (key, col, w) => {
+      ctx.strokeStyle = col; ctx.lineWidth = w; ctx.beginPath(); let pen = false;
+      cycles.forEach(c => { const v = c[key]; if (v == null) { pen = false; return; } pen ? ctx.lineTo(X(c.t), Y(v)) : ctx.moveTo(X(c.t), Y(v)); pen = true; });
+      ctx.stroke();
+    };
+    series("dev_mean", alpha(C.exp, 0.55), 1.2);
+    series("dev_max", C.exp, 1.6);
+    ctx.fillStyle = C.bound;
+    cycles.forEach(c => { if (!c.exp.length) ctx.fillRect(X(c.t) - 1, H - m.b - 5, 2, 5); });
+    const c = cycles[cur];
+    ctx.strokeStyle = C.focus; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(X(c.t), m.t); ctx.lineTo(X(c.t), H - m.b); ctx.stroke();
+    if (c.dev_max != null) { ctx.fillStyle = C.focus; ctx.beginPath(); ctx.arc(X(c.t), Y(c.dev_max), 4, 0, 7); ctx.fill(); }
+    ctx.textAlign = "left"; ctx.textBaseline = "top"; ctx.fillStyle = C.ink; ctx.fillText("max", m.l + 8, m.t + 2);
+    ctx.fillStyle = C.muted; ctx.fillText("mean", m.l + 44, m.t + 2);
+    ctx.fillStyle = C.bound; ctx.fillText("ticks on axis: no trajectory", m.l + 90, m.t + 2);
+    chartMap = { X, m, W, tMax };
+  }
+  chartCv.addEventListener("click", e => {
+    if (!chartMap) return;
+    const r = chartCv.getBoundingClientRect(), x = e.clientX - r.left;
+    const t = (x - chartMap.m.l) / (chartMap.W - chartMap.m.l - chartMap.m.r) * chartMap.tMax;
+    let best = 0, bd = Infinity; cycles.forEach((c, i) => { const d = Math.abs(c.t - t); if (d < bd) { bd = d; best = i; } });
+    select(best, false);
+  });
+
+  // ---------- 3D view ----------
+  const view3d = document.getElementById("view3d");
+  const has3d = typeof THREE !== "undefined" && THREE.OrbitControls && THREE.ConvexGeometry;
+  let R = null;  // renderer state
+  function init3d() {
+    if (R || !has3d) return;
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio || 1);
+    view3d.prepend(renderer.domElement);
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 500);
+    camera.up.set(0, 0, 1);
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = false;
+    controls.addEventListener("change", () => render3d());
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.75));
+    const sun = new THREE.DirectionalLight(0xffffff, 0.6); sun.position.set(3, -5, 8); scene.add(sun);
+    // Whole-map obstacles, built once; shaded by height for depth cues.
+    const box = new THREE.BoxGeometry(cell * 0.96, cell * 0.96, cell * 0.96);
+    const obstMat = new THREE.MeshLambertMaterial({ transparent: true, opacity: 0.38, depthWrite: false });
+    const obst = new THREE.InstancedMesh(box, obstMat, Math.max(nVox, 1));
+    obst.count = 0;
+    scene.add(obst);
+    const dyn = new THREE.Group(); scene.add(dyn);
+    R = { renderer, scene, camera, controls, obst, obstMat, dyn, target: null };
+    new ResizeObserver(() => { size3d(); render3d(); }).observe(view3d);
+  }
+  function size3d() {
+    if (!R) return;
+    const r = view3d.getBoundingClientRect();
+    if (r.width < 2) return;
+    R.renderer.setSize(r.width, r.height, false);
+    R.camera.aspect = r.width / r.height; R.camera.updateProjectionMatrix();
+  }
+  const CROP = 3.0;  // m around the cycle's paths, for the 3D obstacles
+  function colorObstacles() { if (R) R.cropKey = null; }
+  function placeObstacles(b) {
+    // Only voxels near this cycle, shaded lighter with height for depth cues.
+    const key = [b.x0, b.x1, b.y0, b.y1, C.obstacle, C.panel].join();
+    if (R.cropKey === key) return;
+    R.cropKey = key;
+    const base = new THREE.Color(C.obstacle), bg = new THREE.Color(C.panel), col = new THREE.Color(), m4 = new THREE.Matrix4();
+    let zmin = Infinity, zmax = -Infinity;
+    for (let i = 0; i < nVox; i++) { zmin = Math.min(zmin, VZ[i]); zmax = Math.max(zmax, VZ[i]); }
+    let n = 0;
+    for (let i = 0; i < nVox; i++) {
+      const x = VX[i], y = VY[i];
+      if (x < b.x0 - CROP || x > b.x1 + CROP || y < b.y0 - CROP || y > b.y1 + CROP) continue;
+      m4.makeTranslation(x, y, VZ[i]); R.obst.setMatrixAt(n, m4);
+      const f = zmax > zmin ? (VZ[i] - zmin) / (zmax - zmin) : 0.5;
+      col.copy(base).lerp(bg, 0.5 * f); R.obst.setColorAt(n, col);
+      n++;
+    }
+    R.obst.count = n;
+    R.obst.instanceMatrix.needsUpdate = true;
+    if (R.obst.instanceColor) R.obst.instanceColor.needsUpdate = true;
+  }
+  function clearGroup(g) {
+    while (g.children.length) {
+      const o = g.children.pop();
+      o.traverse(x => { if (x.geometry) x.geometry.dispose(); if (x.material) x.material.dispose(); });
+    }
+  }
+  function tube(pts, color, radius, opacity) {
+    if (pts.length < 2) return null;
+    const path = new THREE.CurvePath();
+    for (let i = 1; i < pts.length; i++) {
+      const a = new THREE.Vector3(...pts[i - 1]), b = new THREE.Vector3(...pts[i]);
+      if (a.distanceTo(b) > 1e-4) path.add(new THREE.LineCurve3(a, b));
+    }
+    if (!path.curves.length) return null;
+    const geo = new THREE.TubeGeometry(path, Math.min(600, path.curves.length * 2), radius, 8, false);
+    const mat = new THREE.MeshLambertMaterial({ color, transparent: opacity < 1, opacity });
+    const m = new THREE.Mesh(geo, mat); m.renderOrder = 2; return m;
+  }
+  function build3d() {
+    if (!R) return;
+    const c = cycles[cur], g = R.dyn;
+    clearGroup(g);
+    R.scene.background = new THREE.Color(C.panel);
+    R.obst.visible = on.obst;
+    if (on.corr) c.sfc.forEach(poly => {
+      if (poly.length < 4) return;
+      try {
+        const geo = new THREE.ConvexGeometry(poly.map(p => new THREE.Vector3(p[0], p[1], p[2])));
+        const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: C.corridor, transparent: true, opacity: 0.10, depthWrite: false, side: THREE.DoubleSide }));
+        const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), new THREE.LineBasicMaterial({ color: C.corridor, transparent: true, opacity: 0.6 }));
+        mesh.renderOrder = 1; g.add(mesh, edges);
+      } catch (e) {}
+    });
+    const r = Math.min(c.n_reused, c.guide.length);
+    const add = m => { if (m) g.add(m); };
+    if (on.reused) add(tube(c.guide.slice(0, r), C.reused, 0.03, 1));
+    if (on.astar) add(tube(c.guide.slice(Math.max(r - 1, 0)), C.astar, 0.03, 1));
+    if (on.exp) add(tube(c.exp, C.exp, 0.055, 1));
+    if (on.backup) add(tube(c.backup, C.backup, 0.035, 0.8));
+    let center;
+    if (odom.length) {
+      const k = odomAt(c.t), p = odom[k];
+      if (on.flown) {
+        const pts = []; for (let i = Math.max(0, k - 400); i <= k; i++) pts.push(new THREE.Vector3(odom[i][1], odom[i][2], odom[i][3]));
+        if (pts.length > 1) g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: C.flown })));
+        const drone = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 12), new THREE.MeshLambertMaterial({ color: C.ink }));
+        drone.position.set(p[1], p[2], p[3]); g.add(drone);
+      }
+    }
+    const b = cycleBox(c);
+    placeObstacles(b);
+    let zs = c.guide.concat(c.exp).map(p => p[2]); const zm = zs.length ? zs.reduce((a, v) => a + v, 0) / zs.length : 1.5;
+    center = new THREE.Vector3((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, zm);
+    const span = Math.max(b.x1 - b.x0, b.y1 - b.y0, 2);
+    const grid = new THREE.GridHelper(Math.ceil(span + 6), Math.ceil(span + 6), new THREE.Color(C.rule), new THREE.Color(C.grid));
+    grid.rotation.x = Math.PI / 2; grid.position.set(Math.round(center.x), Math.round(center.y), 0); g.add(grid);
+    if (!R.target) {  // first frame: look from behind-left and above
+      R.camera.position.set(center.x - span * 0.9, center.y - span * 1.3, center.z + span * 1.1);
+      R.controls.target.copy(center);
+    } else {  // keep the viewer's camera offset while following the cycle
+      const d = center.clone().sub(R.controls.target);
+      R.camera.position.add(d); R.controls.target.add(d);
+    }
+    R.target = center;
+    R.controls.update();
+    render3d();
+  }
+  function render3d() { if (R && mode === "3d") R.renderer.render(R.scene, R.camera); }
+
+  let mode = "2d";
+  const tab2d = document.getElementById("tab2d"), tab3d = document.getElementById("tab3d"), planCv = document.getElementById("plan");
+  const viewnote = document.getElementById("viewnote");
+  function setMode(m) {
+    mode = m;
+    tab2d.setAttribute("aria-selected", String(m === "2d")); tab3d.setAttribute("aria-selected", String(m === "3d"));
+    planCv.hidden = m !== "2d"; view3d.hidden = m !== "3d";
+    viewnote.textContent = m === "2d"
+      ? `Top-down. Obstacles are limited to ${SLICE} m around the heights this cycle's paths fly at, so obstacles the drone passes over or under are left out.`
+      : `3D. Obstacles within ${CROP} m of this cycle's paths, at every height, shaded lighter with height. Corridor polytopes are the transparent solids.`;
+    if (m === "3d") {
+      if (!has3d) { if (!view3d.querySelector(".err")) view3d.insertAdjacentHTML("beforeend", `<div class="err">The 3D view needs three.js from cdn.jsdelivr.net, which did not load. The top-down view still works.</div>`); return; }
+      init3d(); size3d(); colorObstacles(); build3d();
+    } else drawCycle(planCv, cycles[cur], { small: false });
+  }
+  tab2d.addEventListener("click", () => setMode("2d"));
+  tab3d.addEventListener("click", () => setMode("3d"));
+
+  // ---------- drawing & interaction ----------
+  function drawAll() {
+    if (mode === "2d") drawCycle(planCv, cycles[cur], { small: false });
+    strip.querySelectorAll(".thumb").forEach(el => drawCycle(el.querySelector("canvas"), cycles[+el.dataset.i], { small: true }));
+    drawChart(); readout();
+  }
+  function select(i, scroll) {
+    cur = Math.max(0, Math.min(cycles.length - 1, i)); slider.value = String(cur);
+    if (mode === "2d") drawCycle(planCv, cycles[cur], { small: false }); else build3d();
+    drawChart(); readout();
+    try { history.replaceState(null, "", "#c" + cur); } catch (e) {}
+    if (scroll) planCv.parentElement.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  }
+  slider.addEventListener("input", () => select(+slider.value, false));
+  document.getElementById("prev").addEventListener("click", () => select(cur - 1));
+  document.getElementById("next").addEventListener("click", () => select(cur + 1));
+  let timer = null;
+  const playBtn = document.getElementById("play");
+  function togglePlay() {
+    if (timer) { clearInterval(timer); timer = null; playBtn.textContent = "Play"; return; }
+    playBtn.textContent = "Pause";
+    timer = setInterval(() => { if (cur >= cycles.length - 1) togglePlay(); else select(cur + 1); }, 1000 / 15);
+  }
+  playBtn.addEventListener("click", togglePlay);
+  document.addEventListener("keydown", e => {
+    if (e.target.tagName === "INPUT" && e.target.type !== "range") return;
+    if (e.key === "ArrowLeft") { select(cur - 1); e.preventDefault(); }
+    else if (e.key === "ArrowRight") { select(cur + 1); e.preventDefault(); }
+    else if (e.key === " " && e.target.tagName !== "BUTTON") { togglePlay(); e.preventDefault(); }
+  });
+
+  readColors();
+  slider.value = String(cur);
+  const redraw = () => { readColors(); drawAll(); if (R) { colorObstacles(); build3d(); } };
+  new ResizeObserver(() => drawAll()).observe(planCv);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redraw);
+  new MutationObserver(redraw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawAll);
+  setMode("2d");
+  drawAll();
+})();
+</script>

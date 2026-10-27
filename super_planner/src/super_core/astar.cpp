@@ -22,6 +22,7 @@
 */
 
 #include <path_search/astar.h>
+#include <chrono>
 
 using namespace color_text;
 using namespace super_utils;
@@ -212,6 +213,17 @@ namespace path_search {
         reverse(point_path.begin(), point_path.end());
     }
 
+    void Astar::setPerceptionCostMap(const PerceptionCostMap::Ptr &pc_map) {
+        pc_map_ = pc_map;
+        pc_grid_ = nullptr;
+        if (pc_map_) {
+            pc_weight_ = cfg_.perception_weight;
+            pc_default_cost_ = pc_map_->params().default_cost;
+        } else {
+            pc_weight_ = 0.0;
+        }
+    }
+
     void Astar::setFineInfNeighbors(const int &neighbor_step) {
         neighbor_list.clear();
         for (int i = -neighbor_step; i <= neighbor_step; i++) {
@@ -240,6 +252,8 @@ namespace path_search {
         out_path.clear();
         double time_1 = ros_ptr_->getSimTime();
         ++rounds_;
+        // Perception cost: take one immutable snapshot for this search (null = off).
+        pc_grid_ = (pc_map_ && pc_weight_ > 0.0) ? pc_map_->snapshot() : nullptr;
         /// 2) Switch both start and end point to local map
 
         rog_map::Vec3f hit_pt;
@@ -340,12 +354,24 @@ namespace path_search {
         startPtr->id_g = start_idx;
         startPtr->rounds = rounds_;
         startPtr->distance_score = 0;
+        startPtr->path_len = 0;
         startPtr->total_score = getHeu(startPtr, endPtr, cfg_.heu_type);
         startPtr->state = GridNode::OPENSET; //put start node in open set
         startPtr->father_ptr = NULL;
         open_set.push(startPtr); //put start in open set
         int num_iter = 0;
         vector<GridNodePtr> node_path;
+
+        // Record search time and expansions whichever way we leave this function.
+        const auto diag_t0 = std::chrono::steady_clock::now();
+        struct DiagGuard {
+            Astar &a; const int &iters; std::chrono::steady_clock::time_point t0;
+            ~DiagGuard() {
+                a.last_iter_num_ = iters;
+                a.last_search_time_ms_ = std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - t0).count();
+            }
+        } diag_guard{*this, num_iter, diag_t0};
 
         if (cfg_.visual_process) {
             ros_ptr_->vizAstarPoints(
@@ -364,6 +390,11 @@ namespace path_search {
             num_iter++;
             current = open_set.top();
             open_set.pop();
+            // An improved node is re-pushed (std::priority_queue has no decrease-key),
+            // so a popped entry may be a stale duplicate of an already expanded node.
+            if (current->state == GridNode::CLOSEDSET) {
+                continue;
+            }
             if (cfg_.visual_process) {
                 rog_map::Vec3f local_pt;
                 globalIndexToPos(current->id_g, local_pt);
@@ -389,8 +420,8 @@ namespace path_search {
                 return REACH_GOAL;
             }
 
-            // Distance terminate condition
-            if (searching_horizon > 0 && current->distance_score > searching_horizon / md_.resolution) {
+            // Distance terminate condition (pure path length, independent of the perception weight)
+            if (searching_horizon > 0 && current->path_len > searching_horizon / md_.resolution) {
                 GridNodePtr local_goal = current;
                 if (md_.unknown_as_occ && !frontier_queue.empty()) {
                     local_goal = frontier_queue.top()->father_ptr;
@@ -483,10 +514,16 @@ namespace path_search {
                         }
 
                         neighborPtr->rounds = rounds_;
-                        double distance_score = sqrt(dx * dx + dy * dy + dz * dz);
-                        distance_score = current->distance_score + distance_score;
-                        rog_map::Vec3f pos;
-                        globalIndexToPos(neighborIdx, pos);
+                        const double step = sqrt(dx * dx + dy * dy + dz * dz);
+                        // Edge cost = step * (1 + w * c). c >= 0 keeps every edge at least its
+                        // length, so the Euclidean heuristic stays admissible.
+                        double step_cost = step;
+                        if (pc_grid_) {
+                            const double c = PerceptionCostMap::cost(*pc_grid_, neighborPos, pc_default_cost_);
+                            step_cost = step * (1.0 + pc_weight_ * c);
+                        }
+                        const double distance_score = current->distance_score + step_cost;
+                        const double path_len = current->path_len + step;
                         double heu_score = getHeu(neighborPtr, endPtr, cfg_.heu_type);
 
                         if (!flag_explored) {
@@ -494,14 +531,17 @@ namespace path_search {
                             neighborPtr->state = GridNode::OPENSET;
                             neighborPtr->father_ptr = current;
                             neighborPtr->distance_score = distance_score;
+                            neighborPtr->path_len = path_len;
                             neighborPtr->distance_to_goal = heu_score;
                             neighborPtr->total_score = distance_score + heu_score;
                             open_set.push(neighborPtr); //put neighbor in open set and record it.
                         } else if (distance_score < neighborPtr->distance_score) {
                             neighborPtr->father_ptr = current;
                             neighborPtr->distance_score = distance_score;
+                            neighborPtr->path_len = path_len;
                             neighborPtr->distance_to_goal = heu_score;
                             neighborPtr->total_score = distance_score + heu_score;
+                            open_set.push(neighborPtr); // re-push; the stale entry is skipped when popped
                         }
                     }
             double time_2 = ros_ptr_->getSimTime();

@@ -42,6 +42,17 @@ namespace super_planner {
         yaw_traj_opt_ = std::make_shared<traj_opt::YawTrajOpt>(cfg_.yaw_dot_max);
         const auto &rog_map_cfg = map_ptr_->getMapConfig();
         astar_ptr_ = std::make_shared<path_search::Astar>(cfg_path, ros_ptr_, map_ptr_);
+        {
+            path_search::PerceptionCostMap::Params pc_prm(cfg_path);
+            if (pc_prm.enable) {
+                pc_map_ = std::make_shared<path_search::PerceptionCostMap>(pc_prm);
+                astar_ptr_->setPerceptionCostMap(pc_map_);
+                ros_ptr_->info(" -- [SUPER] Perception-aware A* cost enabled: topic {}, weight {}, grid {} m, "
+                               "logdet_ref {}, update {} Hz",
+                               pc_prm.plane_topic, pc_prm.weight, pc_prm.grid_resolution,
+                               pc_prm.logdet_ref, pc_prm.update_rate);
+            }
+        }
         cg_ptr_ = std::make_shared<CorridorGenerator>(ros_ptr_, map_ptr_, cfg_.corridor_bound_dis,
                                                       cfg_.corridor_line_max_length,
                                                       cfg_.resolution, rog_map_cfg.virtual_ground_height,
@@ -1156,6 +1167,11 @@ namespace super_planner {
 
         RET_CODE ret_code = astar_ptr_->pointToPointPathSearch(temp_start_point, goal, flag, temp_plannning_horizon,
                                                                path);
+        if (cfg_.print_log) {
+            ros_ptr_->info(" -- [A*] {} in {:.2f} ms, {} iterations, perception cost {}",
+                           RET_CODE_STR[ret_code], astar_ptr_->getLastSearchTimeMs(), astar_ptr_->getLastIterNum(),
+                           astar_ptr_->perceptionCostActive() ? "on" : "off");
+        }
 
         if(ret_code == INIT_ERROR){
             gi_.goal_valid = false;

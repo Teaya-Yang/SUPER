@@ -146,6 +146,11 @@ namespace ros_interface{
             fmt::print(fg(fmt::color::lime_green)," -- [Viz] Set visualization_en_ to {}\n", en);
         }
 
+        /*For the perception-aware A* cost grid (optional; default does nothing) =====*/
+        virtual void vizPerceptionCostGrid(const vec_Vec3f &centres,
+                                           const std::vector<double> &cost,
+                                           const std::vector<double> &logdet) {}
+
     };
 }
 

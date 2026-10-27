@@ -69,14 +69,25 @@ file(GLOB_RECURSE srcs CONFIGURE_DEPENDS src/*.cpp include/*.h include/*.hpp)
 add_library(super STATIC ${srcs})
 target_include_directories(super PUBLIC
         include)
-target_link_libraries(super PUBLIC
-)
+# OpenMP parallelises the perception cost grid build; optional.
+find_package(OpenMP)
+if (OpenMP_CXX_FOUND)
+    target_link_libraries(super PUBLIC OpenMP::OpenMP_CXX)
+endif ()
 
 
 add_executable(fsm_node
         Apps/fsm_node_ros1.cpp
 )
 target_link_libraries(fsm_node
+        super
+        ${THIRD_PARTY}
+)
+
+add_executable(test_perception_cost
+        Apps/test_perception_cost.cpp
+)
+target_link_libraries(test_perception_cost
         super
         ${THIRD_PARTY}
 )
