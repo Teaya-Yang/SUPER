@@ -178,6 +178,18 @@ Trial scripts: `~/ws_super/bags/run_trial.sh`, `~/ws_super/bags/analyze.py` (not
 
 ## Later: integration with the lab stack
 
+Concept (2026-10-26): SUPER replaces only the planner block of `LidarVehicleStateMachine`. Keep takeoff/land, heartbeat, controller, safety.
+
+1. Sensing in: rog_map `cloud_topic: /cloud_registered`, `odom_topic: /Odometry_imu` (both `camera_init` = SUPER world). Perception cost reads `/plane_normals` as is. Config only: map size/origin/ground/ceiling for the Unity scene.
+2. Reference out: new "external reference" flight stage in the state machine that feeds `/planning/pos_cmd` (p, v, a, yaw) into the existing controller call instead of `SamplePlanWorldAtNow`. Hold last reference when commands stop > ~100 ms (SUPER is silent while waiting for a goal / planning from rest). Hand-over: hover first, then publish the goal; SUPER plans from rest at the hover point.
+3. Goals: state machine publishes the waypoint YAML one `PoseStamped` at a time on `/goal`, advances when within radius and SUPER goes quiet.
+4. Processes: first test with ws-palio + ws-super sharing the host master; later move the 3 SUPER packages into ws_palio.
+
+Later variant: consume SUPER's committed `PolynomialTrajectory` (mpc_cmd_topic) and sample it locally, like `_traj` + `_trajResetTime` today.
+
+Validation order: (1) replay a palio bag into SUPER alone, tune `logdet_ref` from the logdet cloud; (2) closed loop in Unity, cost off; (3) cost on vs `k_lidar`.
+
+
 - [ ] Planner interface to match:
 
   | Direction | Topic | Type | YAML key |
