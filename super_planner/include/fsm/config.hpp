@@ -48,6 +48,9 @@ namespace fsm {
 
         bool click_yaw_en{};
         string cmd_topic, mpc_cmd_topic, click_goal_topic;
+        // Lab interface: standard-message reference and FSM state outputs (see launch/lab_fsm.launch).
+        string ref_topic, state_topic, world_frame;
+        double goal_reach_dis{0.1}, state_pub_rate{10.0};
         double yaw_dot_max{};
 
         Config() = default;
@@ -63,6 +66,12 @@ namespace fsm {
             loader.LoadParam("fsm/cmd_topic", cmd_topic, string("/planning/pos_cmd"));
             loader.LoadParam("fsm/mpc_cmd_topic", mpc_cmd_topic, string("/planning_cmd/mpc"));
             loader.LoadParam("fsm/click_goal_topic", click_goal_topic, string("/planning/click_goal_topic"));
+            // Defaults keep the bundled demos unchanged; the lab configs override them.
+            loader.LoadParam("fsm/ref_topic", ref_topic, string("/planning/ref_traj"));
+            loader.LoadParam("fsm/state_topic", state_topic, string("/planning/fsm_state"));
+            loader.LoadParam("fsm/world_frame", world_frame, string("world"));
+            loader.LoadParam("fsm/goal_reach_dis", goal_reach_dis, 0.1);
+            loader.LoadParam("fsm/state_pub_rate", state_pub_rate, 10.0);
 
 
             loader.LoadParam("super_planner/yaw_dot_max", yaw_dot_max, 1.0, true);

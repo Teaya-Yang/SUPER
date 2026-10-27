@@ -36,6 +36,8 @@
 #include "quadrotor_msgs/PositionCommand.h"
 #include "quadrotor_msgs/PolynomialTrajectory.h"
 #include "visualization_msgs/Marker.h"
+#include "trajectory_msgs/MultiDOFJointTrajectory.h"
+#include "std_msgs/String.h"
 
 
 namespace fsm {
@@ -43,7 +45,10 @@ namespace fsm {
         ros::NodeHandle nh_;
         ros::Subscriber goal_sub_;
         ros::Publisher cmd_pub, mpc_cmd_pub_, path_pub_;
-        ros::Timer execution_timer_, replan_timer_, cmd_timer_;
+        // Lab interface: the same reference as cmd_pub in a standard message, plus the FSM state.
+        ros::Publisher ref_pub_, state_pub_;
+        ros::Timer execution_timer_, replan_timer_, cmd_timer_, state_timer_;
+        std::string last_state_str_;
         // Perception-aware A* cost: plane normals in, cost grid rebuilt on a timer.
         ros::Subscriber plane_sub_;
         ros::Timer perception_timer_;
@@ -59,7 +64,7 @@ namespace fsm {
         }
 
         void publishCurPoseToPath() override {
-            path.header.frame_id = "world";
+            path.header.frame_id = cfg_.world_frame;
             path.header.stamp = ros::Time::now();
             geometry_msgs::PoseStamped pose;
             pose.header = path.header;
@@ -83,7 +88,7 @@ namespace fsm {
         void getOneHeartBeatMsg(quadrotor_msgs::PolynomialTrajectory &heartbeat, bool &traj_finish) {
             heartbeat.type = quadrotor_msgs::PolynomialTrajectory::HEART_BEAT;
             heartbeat.header.stamp = ros::Time::now();
-            heartbeat.header.frame_id = "world";
+            heartbeat.header.frame_id = cfg_.world_frame;
             double swt;
             planner_ptr_->getOneHeartbeatTime(swt, traj_finish);
             heartbeat.start_WT_pos = ros::Time(swt);
@@ -91,7 +96,7 @@ namespace fsm {
 
         void getCommittedTrajectory(quadrotor_msgs::PolynomialTrajectory &cmd_traj) {
             cmd_traj.header.stamp = ros::Time::now();
-            cmd_traj.header.frame_id = "world";
+            cmd_traj.header.frame_id = cfg_.world_frame;
             cmd_traj.type = quadrotor_msgs::PolynomialTrajectory::POSITION_TRAJ |
                             quadrotor_msgs::PolynomialTrajectory::HEART_BEAT;
             planner_ptr_->lockCommittedTraj();
@@ -141,7 +146,7 @@ namespace fsm {
             bool on_backup_traj;
             planner_ptr_->getOneCommandFromTraj(pvaj, yaw, yaw_dot, on_backup_traj, traj_finish);
             pos_cmd.header.stamp = ros::Time::now();
-            pos_cmd.header.frame_id = "world";
+            pos_cmd.header.frame_id = cfg_.world_frame;
             pos_cmd.position.x = pvaj(0, 0);
             pos_cmd.position.y = pvaj(1, 0);
             pos_cmd.position.z = pvaj(2, 0);
@@ -170,6 +175,63 @@ namespace fsm {
             pos_cmd.thrust.z = aT;
             latest_cmd = pos_cmd;
             cmd_logs_.push_back(latest_cmd);
+        }
+
+        // FSM state as published on state_topic. "_BACKUP" marks the backup trajectory, which
+        // switches inside the command sampler without going through ChangeState.
+        std::string fsmStateString() const {
+            std::string s = MACHINE_STATE_STR[machine_state_];
+            if (machine_state_ == FOLLOW_TRAJ && latest_cmd.trajectory_flag == 2) {
+                s += "_BACKUP";
+            }
+            return s;
+        }
+
+        void publishFsmState(bool force) {
+            const std::string s = fsmStateString();
+            if (!force && s == last_state_str_) {
+                return;
+            }
+            last_state_str_ = s;
+            std_msgs::String msg;
+            msg.data = s;
+            state_pub_.publish(msg);
+        }
+
+        void onStateChanged() override {
+            publishFsmState(false);
+        }
+
+        void stateTimerCallback(const ros::TimerEvent &event) {
+            publishFsmState(true);
+        }
+
+        // One-point trajectory carrying p, v, a, yaw and yaw rate of the position command, for
+        // consumers that do not build quadrotor_msgs (the lab's hiperlab_rostools).
+        void publishRefTraj(const quadrotor_msgs::PositionCommand &c) {
+            trajectory_msgs::MultiDOFJointTrajectory m;
+            m.header = c.header;
+            m.joint_names.push_back("base");
+            trajectory_msgs::MultiDOFJointTrajectoryPoint pt;
+            geometry_msgs::Transform tf;
+            tf.translation.x = c.position.x;
+            tf.translation.y = c.position.y;
+            tf.translation.z = c.position.z;
+            tf.rotation.x = 0.0;
+            tf.rotation.y = 0.0;
+            tf.rotation.z = std::sin(0.5 * c.yaw);
+            tf.rotation.w = std::cos(0.5 * c.yaw);
+            geometry_msgs::Twist v;
+            v.linear = c.velocity;
+            v.angular.z = c.yaw_dot;
+            geometry_msgs::Twist a;
+            a.linear = c.acceleration;
+            pt.transforms.push_back(tf);
+            pt.velocities.push_back(v);
+            pt.accelerations.push_back(a);
+            pt.time_from_start = ros::Duration(0);
+            m.points.push_back(pt);
+            ref_pub_.publish(m);
         }
 
     public:
@@ -243,7 +305,7 @@ namespace fsm {
             getOnePositionCommand(pid_cmd_, traj_finish_);
             if (traj_finish_) {
                 cout << GREEN << " -- [Fsm] Traj finish." << RESET << endl;
-                if (closeToGoal(0.1)) {
+                if (closeToGoal(cfg_.goal_reach_dis)) {
                     ChangeState("getPoseFromTraj", WAIT_GOAL);
                 } else {
                     ChangeState("getPoseFromTraj", GENERATE_TRAJ);
@@ -285,6 +347,8 @@ namespace fsm {
             cmd_pub = nh_.advertise<quadrotor_msgs::PositionCommand>(cfg_.cmd_topic, 10);
             mpc_cmd_pub_ = nh_.advertise<quadrotor_msgs::PolynomialTrajectory>(cfg_.mpc_cmd_topic, 10);
             path_pub_ = nh_.advertise<nav_msgs::Path>("fsm/path", 100);
+            ref_pub_ = nh_.advertise<trajectory_msgs::MultiDOFJointTrajectory>(cfg_.ref_topic, 10);
+            state_pub_ = nh_.advertise<std_msgs::String>(cfg_.state_topic, 10, true);
 
             int cmd_cnt = 0;
 
@@ -304,6 +368,8 @@ namespace fsm {
                 cmd_timer_ = nh_.createTimer(ros::Duration(0.01), &FsmRos1::pubCmdTimerCallback, this); // 100Hz
                 replan_timer_ = nh_.createTimer(ros::Duration(1.0 / cfg_.replan_rate), &FsmRos1::replanTimerCallback,
                                                 this); // 10Hz
+                state_timer_ = nh_.createTimer(ros::Duration(1.0 / std::max(0.5, cfg_.state_pub_rate)),
+                                               &FsmRos1::stateTimerCallback, this);
             }
 
             if (auto pc_map = planner_ptr_->getPerceptionCostMap()) {
@@ -325,6 +391,7 @@ namespace fsm {
             }
             write_time_ << endl;
             machine_state_ = INIT;
+            publishFsmState(true);
             system_start_time_ = ros_ptr_->getSimTime();
 
             pid_cmd_.kx[0] = 5.7;
@@ -350,9 +417,11 @@ namespace fsm {
             getOnePositionCommand(pid_cmd_, traj_finish_);
             mpc_cmd_pub_.publish(heartbeat);
             cmd_pub.publish(pid_cmd_);
+            publishRefTraj(pid_cmd_);
+            publishFsmState(false);
             if (traj_finish_) {
                 cout << GREEN << " -- [Fsm] Traj finish." << RESET << endl;
-                if (closeToGoal(0.1)) {
+                if (closeToGoal(cfg_.goal_reach_dis)) {
                     ChangeState("PubCmdCallback", WAIT_GOAL);
                 } else {
                     ChangeState("PubCmdCallback", GENERATE_TRAJ);

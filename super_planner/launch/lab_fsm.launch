@@ -1,0 +1,26 @@
+<launch>
+  <!-- SUPER planner only, for the lab stack (Unity sim or real vehicle): FAST_LIO supplies
+       /Odometry_imu, /cloud_registered and /plane_normals in camera_init; the lab's
+       quad_super_waypoint_control node sends goals and tracks /planning/ref_traj.
+       No perfect_drone_sim here. Usage:
+         roslaunch super_planner lab_fsm.launch                      # perception cost on
+         roslaunch super_planner lab_fsm.launch config:=lab_unity_smooth_ros1.yaml rviz:=true -->
+  <arg name="config" default="lab_unity_ros1.yaml"/>   <!-- file name under super_planner/config -->
+  <arg name="world_frame" default="camera_init"/>      <!-- must match fsm/world_frame in the config -->
+  <arg name="alias_world_tf" default="true"/>
+  <arg name="rviz" default="false"/>
+  <arg name="rviz_config" default="$(find super_planner)/rviz/default.rviz"/>
+
+  <node pkg="super_planner" type="fsm_node" name="fsm_node" output="screen">
+    <param name="config_name" value="$(arg config)" type="string"/>
+  </node>
+
+  <!-- SUPER's visualization markers and rog_map's world->drone TF use the literal frame "world"
+       while the data lives in FAST_LIO's camera_init. An identity alias lets RViz (fixed frame
+       camera_init) show them without touching the visualization code. -->
+  <node if="$(arg alias_world_tf)" pkg="tf2_ros" type="static_transform_publisher" name="super_world_alias_tf"
+        args="0 0 0 0 0 0 1 $(arg world_frame) world"/>
+
+  <node if="$(arg rviz)" pkg="rviz" type="rviz" name="super_rviz"
+        args="-d $(arg rviz_config) -f $(arg world_frame)" output="log"/>
+</launch>

@@ -167,5 +167,8 @@ namespace fsm {
         virtual void publishCurPoseToPath() = 0;
 
         virtual void resetVisualizedPath() = 0;
+
+        // Called at the end of ChangeState; ROS interfaces use it to publish the state.
+        virtual void onStateChanged() {}
     };
 }

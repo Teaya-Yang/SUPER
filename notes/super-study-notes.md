@@ -217,3 +217,26 @@ Validation order: (1) replay a palio bag into SUPER alone, tune `logdet_ref` fro
 ## Optional tools
 
 - `read_replan_log` and `traj_opt_tuning` replay recorded replans from `super_planner/log/replan_logs/*.bin`. They are commented out in `super_planner/CMakeLists.txt` (around lines 84 to 101). Uncomment and rebuild to use them. They are useful for testing a new cost term offline.
+
+## Lab integration: implemented (2026-10-26)
+
+Interface is standard messages only, so `hiperlab_rostools` never builds `quadrotor_msgs` and the two containers keep building separately.
+
+| Direction | Topic | Type | SUPER yaml key |
+|---|---|---|---|
+| in | `/planning/goal` | `geometry_msgs/PoseStamped` (NaN quaternion = no goal yaw) | `fsm/click_goal_topic` |
+| out | `/planning/ref_traj` | `trajectory_msgs/MultiDOFJointTrajectory`, one point: p, yaw quaternion, v + yaw rate, a | `fsm/ref_topic` |
+| out | `/planning/fsm_state` | `std_msgs/String`: INIT, WAIT_GOAL, GENERATE_TRAJ, FOLLOW_TRAJ, FOLLOW_TRAJ_BACKUP, EMER_STOP; latched, on change and at `fsm/state_pub_rate` | `fsm/state_topic` |
+
+SUPER changes (all defaults reproduce the old behaviour, so the click demos are unchanged):
+
+- `fsm_ros1.hpp`: `publishRefTraj` and `publishFsmState` next to the existing `quadrotor_msgs` publishers; `fsm/world_frame` replaces the four literal `"world"` stamps; `Fsm::onStateChanged` hook from `ChangeState`.
+- `fsm/goal_reach_dis` replaces the hard-coded `closeToGoal(0.1)`. With real tracking error 0.1 m made SUPER loop GENERATE_TRAJ instead of reaching WAIT_GOAL.
+- `super_planner/yaw_offset_rad` is subtracted from the measured yaw in `SuperPlanner::getRobotState` (the only refresh point), so the yaw plan starts and ends in the "body -X heading" frame the lab uses. Without it the lab's +pi offset asked for a 180 degree turn at every leg start.
+- Configs `config/lab_unity_ros1.yaml` (cost on) and `lab_unity_smooth_ros1.yaml` (cost off); launch `launch/lab_fsm.launch`; `super.sh lab`.
+
+Lab side: `GeneralCode/ROS/hiperlab_rostools/src/QuadSuperWaypointControl/` (README there has the run procedure and the fake-SUPER test).
+
+Still open from the plan above: tune `logdet_ref` on the Unity stack, then the cost-on vs `k_lidar` comparison.
+
+Step-by-step Unity test procedure: `notes/lab-unity-test-procedure.md`.

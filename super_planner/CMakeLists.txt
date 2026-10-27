@@ -30,6 +30,7 @@ find_package(catkin REQUIRED COMPONENTS
         message_generation
         quadrotor_msgs
         visualization_msgs
+        trajectory_msgs
         message_filters
         rog_map
         yaml-cpp

@@ -130,7 +130,7 @@ namespace fsm {
                 break;
             }
             case GENERATE_TRAJ: {
-                if (closeToGoal(0.1)) {
+                if (closeToGoal(cfg_.goal_reach_dis)) {
                     ChangeState("MainFsmCallback", WAIT_GOAL);
                     gi_.new_goal = false;
                     finish_plan = true;
@@ -226,5 +226,6 @@ namespace fsm {
         fmt::print(fg(fmt::color::green), " -- [Fsm]: [{}] change state from [{}] to [{}].\n", call_func,
                    MACHINE_STATE_STR[int(machine_state_)], MACHINE_STATE_STR[int(new_state)]);
         machine_state_ = new_state;
+        onStateChanged();
     }
 }

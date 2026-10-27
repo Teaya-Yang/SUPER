@@ -1219,6 +1219,12 @@ namespace super_planner {
 
     void SuperPlanner::getRobotState(rog_map::RobotState &out) {
         robot_state_ = map_ptr_->getRobotState();
+        // Only place robot_state_ is refreshed: the yaw plan seeds from robot_state_.yaw and the
+        // command falls back to it, so applying the offset here keeps both in the same frame.
+        if (cfg_.yaw_offset_rad != 0.0) {
+            const double y = robot_state_.yaw - cfg_.yaw_offset_rad;
+            robot_state_.yaw = std::atan2(std::sin(y), std::cos(y));
+        }
         out = robot_state_;
     }
 }

@@ -102,6 +102,13 @@ case "$action" in
         docker exec -it "$container" /usr/local/bin/super-entrypoint \
             roslaunch mission_planner "$launch" "$@"
         ;;
+    lab)
+        # fsm_node only, configured for the lab stack (FAST_LIO topics, camera_init frame).
+        # Run the Unity endpoint, simulator, FAST_LIO and quad_super_waypoint_control in ws-palio.
+        [[ -n "${DISPLAY:-}" ]] && refresh_xauth || true
+        docker exec -it "$container" /usr/local/bin/super-entrypoint \
+            roslaunch super_planner lab_fsm.launch "$@"
+        ;;
     exec)
         docker exec "$container" /usr/local/bin/super-entrypoint "$@"
         ;;
@@ -115,6 +122,6 @@ case "$action" in
         docker rm -f "$container"
         ;;
     *)
-        echo "Usage: bash $0 {init|image|up|build [CATKIN_ARGS...]|shell|demo {high_speed|dense|click}|exec COMMAND...|start|stop|rm}"
+        echo "Usage: bash $0 {init|image|up|build [CATKIN_ARGS...]|shell|demo {high_speed|dense|click}|lab [ROSLAUNCH_ARGS...]|exec COMMAND...|start|stop|rm}"
         ;;
 esac

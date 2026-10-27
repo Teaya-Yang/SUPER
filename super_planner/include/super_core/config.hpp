@@ -72,6 +72,9 @@ namespace super_planner {
         double yaw_dot_max;
         // Yaw mode: 1 heading to velocity, 2 heading to goal
         int yaw_mode = YAW_TO_VEL;
+        // Subtracted from the measured yaw before planning, so the planned and published
+        // yaw is the heading of a rotated body axis (pi: body -X, the lab's rear-facing sensor).
+        double yaw_offset_rad{0.0};
 
         rog_map::vec_E<rog_map::Vec3i> seed_line_neighbour;
 
@@ -101,6 +104,7 @@ namespace super_planner {
             loader.LoadParam("super_planner/robot_r", robot_r, 0.3);
             loader.LoadParam("super_planner/iris_iter_num", iris_iter_num, 1);
             loader.LoadParam("super_planner/yaw_mode", yaw_mode, 1);
+            loader.LoadParam("super_planner/yaw_offset_rad", yaw_offset_rad, 0.0);
             loader.LoadParam("super_planner/mpc_horizon", mpc_horizon, 1);
             loader.LoadParam("super_planner/yaw_dot_max", yaw_dot_max, 3.14);
 
