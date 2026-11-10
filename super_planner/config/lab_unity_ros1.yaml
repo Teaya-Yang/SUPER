@@ -124,7 +124,7 @@ astar:
     update_rate: 2.0            # Hz, cost grid rebuild
     grid_resolution: 0.5        # m
     half_extent: [10.0, 10.0, 2.0]   # m around the drone; >= planning_horizon + margin
-    range: [0.1, 10.0]          # m, Mid-360
+    range: [0.1, 50.0]          # m, Mid-360
     elevation_deg: [-27.0, 32.0] # level world frame; Mid-360 (-7..52) pitched 20 deg down
     max_planes: 200
     sigma_r: 0.02               # m

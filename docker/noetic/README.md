@@ -55,22 +55,20 @@ YAML/launch changes take effect on the next launch without rebuilding.
 
 ## Run with the lab stack (Unity sim + FAST_LIO + hiperlab_rostools)
 
-The lab's `ws-palio` container runs the Unity endpoint, `simulator 113`,
-`fast_lio mapping_unitysim.launch` and the `quad_super_waypoint_control`
-state machine; this container runs only the planner. Both share the host
-ROS master (`--network host`), so start the lab stack first, then:
+For Unity tests the lab's `ws-palio` container builds `super_planner`, `rog_map` and
+`quadrotor_msgs` itself (linked into `~/ws_palio/src/SUPER/`) and launches
+`super_planner/launch/lab_fsm.launch` with `palio.sh super`. This container is then
+only for SUPER's own demos and unit tests. Procedure: `notes/lab-unity-test-procedure.md`.
+
+If `ws-palio` was built without SUPER, the two-container variant still works: start the
+lab stack, then from this repo
 
 ```bash
 bash docker/noetic/super.sh lab                                   # perception cost on
 bash docker/noetic/super.sh lab config:=lab_unity_smooth_ros1.yaml rviz:=true   # cost off, with RViz
 ```
 
-This launches `super_planner/launch/lab_fsm.launch` with
-`config/lab_unity_ros1.yaml`: rog_map reads `/Odometry_imu` and
-`/cloud_registered`, the perception cost reads `/plane_normals`, goals arrive
-on `/planning/goal` (`geometry_msgs/PoseStamped`) and the reference leaves on
-`/planning/ref_traj` (`trajectory_msgs/MultiDOFJointTrajectory`, one point)
-with the FSM state on `/planning/fsm_state` (`std_msgs/String`). All frames
-are FAST_LIO's `camera_init`; the launch adds an identity `camera_init -> world`
-TF so SUPER's RViz markers line up. Procedure and checks: the lab node's
-README in `GeneralCode/ROS/hiperlab_rostools/src/QuadSuperWaypointControl/`.
+Both containers share the host ROS master (`--network host`). Topics: goals on
+`/planning/goal` (`geometry_msgs/PoseStamped`), reference on `/planning/ref_traj`
+(`trajectory_msgs/MultiDOFJointTrajectory`, one point), FSM state on
+`/planning/fsm_state` (`std_msgs/String`), all in FAST_LIO's `camera_init` frame.

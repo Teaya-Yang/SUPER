@@ -33,9 +33,10 @@ find_package(catkin REQUIRED COMPONENTS
         trajectory_msgs
         message_filters
         rog_map
-        yaml-cpp
         tf
 )
+# Not a catkin component: catkin only searches the workspace prefix path for components,
+# which fails under catkin_tools (the lab's ws_palio). The plain find_package below suffices.
 find_package(yaml-cpp REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system filesystem regex iostreams)
 find_package(Eigen3 REQUIRED)

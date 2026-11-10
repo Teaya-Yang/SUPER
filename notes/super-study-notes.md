@@ -239,4 +239,4 @@ Lab side: `GeneralCode/ROS/hiperlab_rostools/src/QuadSuperWaypointControl/` (REA
 
 Still open from the plan above: tune `logdet_ref` on the Unity stack, then the cost-on vs `k_lidar` comparison.
 
-Step-by-step Unity test procedure: `notes/lab-unity-test-procedure.md`.
+Step-by-step Unity test procedure (single `ws-palio` container; `ws_super` only for SUPER's own demos and tests): `notes/lab-unity-test-procedure.md`.
